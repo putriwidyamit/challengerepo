@@ -1,0 +1,448 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "User Data Console API",
+    "description": "API surface for the ws_user dataset: user search, data quality analysis, duplicate account detection, multi-table user profile lookup, and system health.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "/", "description": "Current host" }
+  ],
+  "tags": [
+    { "name": "Search", "description": "Search across ws_user by email, phone, user ID, or name" },
+    { "name": "Quality", "description": "Data quality analysis of the ws_user table" },
+    { "name": "Duplicates", "description": "Duplicate account detection" },
+    { "name": "Profile", "description": "Multi-table user profile lookup (ws_user + orders + transactions + activity)" },
+    { "name": "Health", "description": "System / database health check" }
+  ],
+  "paths": {
+    "/api/search": {
+      "get": {
+        "tags": ["Search"],
+        "summary": "Search users",
+        "description": "Search across the ws_user table with a type-specific lookup: exact match on email/phone/user_id, or partial (ILIKE) match on name.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Search query. Max length 1000 characters.",
+            "schema": { "type": "string", "maxLength": 1000 },
+            "example": "evi_lynn@yahoo.co.id"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": true,
+            "description": "Which field to search against.",
+            "schema": { "type": "string", "enum": ["email", "phone", "user_id", "name"] },
+            "example": "email"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Max results to return.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Pagination offset.",
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SearchResponse" },
+                "example": {
+                  "query": "evi_lynn@yahoo.co.id",
+                  "type": "email",
+                  "limit": 10,
+                  "offset": 0,
+                  "results": [
+                    {
+                      "user_id": 1714850,
+                      "full_name": "Ni Luh Putu Evyanti Pujaningsih",
+                      "user_email": "evi_lynn@yahoo.co.id",
+                      "msisdn": "6281****90",
+                      "status": 1,
+                      "created_at": "2019-02-12T00:13:02+00:00"
+                    }
+                  ],
+                  "total": 1,
+                  "took_ms": 12
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (missing/invalid q, type, limit, or offset)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "Invalid type. Must be one of: email, phone, user_id, name" }
+              }
+            }
+          },
+          "500": {
+            "description": "Database error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "Database error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quality": {
+      "get": {
+        "tags": ["Quality"],
+        "summary": "Analyze data quality",
+        "description": "Runs a set-based PostgreSQL analysis of the ws_user table: missing/invalid/duplicate counts for email, phone, birth_date, and hobbies, plus a status distribution and a list of detected data issues. Results are cached in memory for 10 seconds.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Quality analysis result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/QualityResponse" }
+              }
+            }
+          },
+          "503": {
+            "description": "Analysis unavailable (unexpected error)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "Data quality analysis unavailable" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/duplicates/find": {
+      "get": {
+        "tags": ["Duplicates"],
+        "summary": "Find duplicate accounts",
+        "description": "Detects potential duplicate accounts using the selected method. `combined` merges email, phone and name-similarity signals and also looks for users sharing multiple signals at once. `ip_address` currently always returns an empty list — there is no activity table backing IP tracking.",
+        "parameters": [
+          {
+            "name": "method",
+            "in": "query",
+            "required": false,
+            "description": "Detection method.",
+            "schema": {
+              "type": "string",
+              "enum": ["ip_address", "phone", "email", "name", "combined"],
+              "default": "combined"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Max duplicate groups to return (hard cap 500).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Duplicate groups found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DuplicatesResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported detection method",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": {
+                  "error": "Unsupported duplicate detection method",
+                  "supported_methods": ["ip_address", "phone", "email", "name", "combined"]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Detection failed (unexpected error)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "Duplicate detection failed" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user-profile/{user_id}": {
+      "get": {
+        "tags": ["Profile"],
+        "summary": "Get aggregated user profile",
+        "description": "Joins ws_user with user_orders, user_transactions, and user_activity using pre-aggregated CTEs (avoiding row-multiplication from a naive multi-table join).",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "description": "Numeric user ID (route constraint: digits only).",
+            "schema": { "type": "integer" },
+            "example": 1714850
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregated profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserProfileResponse" },
+                "example": {
+                  "user_id": 1714850,
+                  "profile": {
+                    "name": "Ni Luh Putu Evyanti Pujaningsih",
+                    "email": "evi_lynn@yahoo.co.id",
+                    "phone": "6281****90"
+                  },
+                  "orders": { "count": 3 },
+                  "transactions": { "count": 5, "total_amount": 452000.0 },
+                  "activity": { "count": 12, "last_activity": "2026-08-01T09:12:00+00:00" },
+                  "_meta": { "took_ms": 4.2 }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "User not found" }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "Internal server error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "System health check",
+        "description": "Verifies the database connection and returns the total row count across every table in the current schema.",
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" },
+                "example": {
+                  "status": "ready",
+                  "total_records": 15000123,
+                  "database": "connected",
+                  "timestamp": "2026-08-18T09:00:00+00:00"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "supported_methods": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "SearchResultUser": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "full_name": { "type": "string", "nullable": true },
+          "user_email": { "type": "string", "nullable": true },
+          "msisdn": { "type": "string", "nullable": true, "description": "Masked, e.g. 6281****90" },
+          "status": { "type": "integer", "description": "0=Inactive, 1=Active, 2=Suspended" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "type": { "type": "string" },
+          "limit": { "type": "integer" },
+          "offset": { "type": "integer" },
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SearchResultUser" }
+          },
+          "total": { "type": "integer" },
+          "took_ms": { "type": "integer" }
+        }
+      },
+      "FieldQualityMetrics": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer" },
+          "present": { "type": "integer" },
+          "missing_count": { "type": "integer" },
+          "missing_percent": { "type": "number" },
+          "unique": { "type": "integer" },
+          "duplicate_count": { "type": "integer" },
+          "invalid_format": { "type": "integer" },
+          "malformed": { "type": "integer" }
+        }
+      },
+      "DataIssue": {
+        "type": "object",
+        "properties": {
+          "field": { "type": "string", "example": "email" },
+          "issue_type": { "type": "string", "example": "invalid_format" },
+          "count": { "type": "integer" },
+          "examples": { "type": "array", "items": { "type": "string" } },
+          "severity": { "type": "string", "enum": ["low", "medium", "high"] }
+        }
+      },
+      "QualityResponse": {
+        "type": "object",
+        "properties": {
+          "total_records": { "type": "integer" },
+          "analyzed_at": { "type": "string", "format": "date-time" },
+          "quality_metrics": {
+            "type": "object",
+            "properties": {
+              "email": { "$ref": "#/components/schemas/FieldQualityMetrics" },
+              "phone": { "$ref": "#/components/schemas/FieldQualityMetrics" },
+              "birth_date": { "$ref": "#/components/schemas/FieldQualityMetrics" },
+              "hobbies": {
+                "type": "object",
+                "properties": {
+                  "total": { "type": "integer" },
+                  "null_count": { "type": "integer" },
+                  "null_percent": { "type": "number" },
+                  "with_special_chars": { "type": "integer" },
+                  "with_emoji": { "type": "integer" }
+                }
+              },
+              "status": {
+                "type": "object",
+                "properties": {
+                  "total": { "type": "integer" },
+                  "distribution": {
+                    "type": "object",
+                    "additionalProperties": { "type": "integer" },
+                    "description": "Keyed by status code as a string, e.g. {\"1\": 9000, \"0\": 1500}"
+                  }
+                }
+              }
+            }
+          },
+          "data_issues": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DataIssue" }
+          },
+          "took_ms": { "type": "integer" }
+        }
+      },
+      "DuplicateGroup": {
+        "type": "object",
+        "properties": {
+          "group_id": { "type": "integer" },
+          "shared_attribute": { "type": "string", "nullable": true },
+          "attribute_type": { "type": "string", "enum": ["email", "phone", "name_similarity"] },
+          "user_count": { "type": "integer" },
+          "user_ids": { "type": "array", "items": { "type": "integer" } },
+          "user_names": { "type": "array", "items": { "type": "string" } },
+          "first_activity": { "type": "string", "format": "date-time", "nullable": true },
+          "last_activity": { "type": "string", "format": "date-time", "nullable": true },
+          "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+          "similarity_score": { "type": "number", "format": "float", "minimum": 0, "maximum": 1 },
+          "match_reasons": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "DuplicatesResponse": {
+        "type": "object",
+        "properties": {
+          "method": { "type": "string" },
+          "duplicate_groups": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DuplicateGroup" }
+          },
+          "total_groups_found": { "type": "integer" },
+          "total_duplicate_users": { "type": "integer" },
+          "took_ms": { "type": "integer" }
+        }
+      },
+      "UserProfileResponse": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "profile": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "nullable": true },
+              "email": { "type": "string", "nullable": true },
+              "phone": { "type": "string", "nullable": true }
+            }
+          },
+          "orders": {
+            "type": "object",
+            "properties": { "count": { "type": "integer" } }
+          },
+          "transactions": {
+            "type": "object",
+            "properties": {
+              "count": { "type": "integer" },
+              "total_amount": { "type": "number" }
+            }
+          },
+          "activity": {
+            "type": "object",
+            "properties": {
+              "count": { "type": "integer" },
+              "last_activity": { "type": "string", "format": "date-time", "nullable": true }
+            }
+          },
+          "_meta": {
+            "type": "object",
+            "properties": { "took_ms": { "type": "number" } }
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ready" },
+          "total_records": { "type": "integer" },
+          "database": { "type": "string", "enum": ["connected", "disconnected"] },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

@@ -11,6 +11,10 @@ Route::get('/portal', function () {
     return view('portal');
 });
 
+Route::get('/api-docs', function () {
+    return view('api-docs');
+});
+
 Route::get('/search', function () {
     return view('search');
 });
