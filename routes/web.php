@@ -7,6 +7,20 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/search', function () {
+    return view('search');
+});
+
 // Health Check Routes
 Route::get('/health', [HealthController::class, 'check']);
 Route::get('/health/dashboard', [HealthController::class, 'dashboard']);
+
+// Quality Dashboard Route
+Route::get('/quality', function () {
+    return view('quality-dashboard');
+});
+
+// Duplicate Detection UI Route
+Route::get('/duplicates', function () {
+    return view('duplicates');
+});
